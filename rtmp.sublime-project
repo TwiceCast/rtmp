@@ -1,0 +1,16 @@
+{
+  "folders":
+  [
+    {
+      "path": "src",
+      "folder_exclude_patterns": [],
+      "file_exclude_patterns": [],
+    },
+  ],
+  "settings":
+  {
+    "tab_size": 2,
+    "translate_tabs_to_spaces": true,
+    "detect_indentation": false,
+  },
+}
