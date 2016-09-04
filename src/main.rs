@@ -2,12 +2,17 @@ extern crate byteorder;
 extern crate rand;
 extern crate time;
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread;
 use std::str;
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+
 use rand::Rng;
+
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc;
+use std::thread;
 
 #[derive(Debug)]
 enum Error {
@@ -69,7 +74,7 @@ impl F1 {
     let time = try!(reader.read_u32::<BigEndian>());
     let zero = try!(reader.read_u32::<BigEndian>());
     if zero != 0 {
-      return Err("Fuck zeros".into());
+//      return Err("Fuck zeros".into());
     }
     let mut bytes: [u8; 1528] = unsafe { ::std::mem::uninitialized() };
     try!(reader.read_exact(&mut bytes));
@@ -101,8 +106,8 @@ impl ::std::fmt::Debug for F1 {
   }
 }
 
-fn handle_client(stream: TcpStream) {
-  let start = SteadyTime::now();
+fn handle_client(stream: TcpStream) -> Result<()> {
+//  let start = time::SteadyTime::now();
 
   println!("{:?}, {:?}", stream.peer_addr(), stream.local_addr());
   let mut reader = BufReader::new(&stream);
@@ -119,17 +124,25 @@ fn handle_client(stream: TcpStream) {
   let s0 = F0 {
     version: 3,
   };
-  s0.write(&mut writer);
+  try!(s0.write(&mut writer));
 
   let mut rng = rand::thread_rng();
   let mut bytes: [u8; 1528] = unsafe { ::std::mem::uninitialized() };
   rng.fill_bytes(&mut bytes);
   let s1 = F1 {
-    time: timestamp(),
+    time: 0,
     zero: 0,
     bytes: bytes,
   };
-  s1.write(&mut writer);
+  try!(s1.write(&mut writer));
+
+  let s2 = F1 {
+    time: c1.time,
+    zero: c1.time + 2000,
+    bytes: c1.bytes,
+  };
+  try!(s2.write(&mut writer));
+  try!(writer.flush());
   loop {
     match reader.read(&mut bytes) {
       Ok(size) => {
@@ -140,23 +153,48 @@ fn handle_client(stream: TcpStream) {
       }
       Err(e) => {
         println!("{:?}", e);
+        break;
       }
     }
   }
+  Ok(())
 }
 
 fn main() {
   let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
+  let mut handle_thread = Vec::new();
+//  let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
 
   for stream in listener.incoming() {
     match stream {
       Ok(stream) => {
-        thread::spawn(move|| {
+        let builder = thread::Builder::new().name("handle_client".into());
+//        let thread_tx = tx.clone();
+
+        match builder.spawn(move || {
           handle_client(stream)
-        });
+        }) {
+          Ok (thread) => {
+            handle_thread.push(thread);
+          }
+          Err(e) => {
+            println!("{:?}", e);
+          }
+        }
       }
       Err(e) => {
         println!("{:?}", e);
+      }
+    }
+  }
+
+  for thread in handle_thread {
+    match thread.join() {
+      Ok(_) => {
+        return;
+      }
+      Err(_) => {
+        return;
       }
     }
   }
