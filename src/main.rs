@@ -161,7 +161,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 }
 
 fn main() {
-  let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
+  let listener = TcpListener::bind("0.0.0.0:80").unwrap();
   let mut handle_thread = Vec::new();
 //  let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
 
