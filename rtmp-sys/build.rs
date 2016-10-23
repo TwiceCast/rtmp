@@ -1,19 +1,16 @@
 extern crate make_cmd;
 
-fn main() {
-  let output = make_cmd::make().current_dir("rtmpdump/librtmp").output();
+use std::env;
 
-  match output {
-    Ok(output) => {
-      if !output.status.success() {
-        print!("{}", String::from_utf8_lossy(&output.stderr));
-        panic!("can't build librtmp : {}", String::from_utf8_lossy(&output.stderr))
-      }
-      print!("{}", String::from_utf8_lossy(&output.stdout))
-    },
-    Err(err) => {
-      panic!("{}", err)
-    }
+fn main() {
+  let mut command = make_cmd::make();
+  command.current_dir("rtmpdump/librtmp");
+  let status = command.status().unwrap();
+
+  if !status.success() {
+    panic!("Can't build librtmp!");
   }
-  return
+
+  println!("cargo:rustc-link-search=native={}/rtmpdump/librtmp", env::var("CARGO_MANIFEST_DIR").unwrap());
+  println!("cargo:rustc-link-lib=static=rtmp");
 }
