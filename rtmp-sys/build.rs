@@ -1,16 +1,18 @@
-extern crate make_cmd;
+extern crate gcc;
 
-use std::env;
+const SOURCES: &'static [&'static str] = &[
+    "rtmpdump/librtmp/rtmp.c",
+    "rtmpdump/librtmp/log.c",
+    "rtmpdump/librtmp/amf.c",
+    "rtmpdump/librtmp/hashswf.c",
+    "rtmpdump/librtmp/parseurl.c",
+];
 
 fn main() {
-  let mut command = make_cmd::make();
-  command.current_dir("rtmpdump/librtmp");
-  let status = command.status().unwrap();
-
-  if !status.success() {
-    panic!("Can't build librtmp!");
+  let mut config = gcc::Config::new();
+  for source in SOURCES {
+      config.file(source);
   }
-
-  println!("cargo:rustc-link-search=native={}/rtmpdump/librtmp", env::var("CARGO_MANIFEST_DIR").unwrap());
-  println!("cargo:rustc-link-lib=static=rtmp");
+  config.define("NO_CRYPTO", None);
+  config.compile("librtmp.a");
 }

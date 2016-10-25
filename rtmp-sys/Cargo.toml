@@ -8,9 +8,7 @@ build = "build.rs"
 
 [dependencies]
 libc = "0.2.0"
-libz-sys = "1.0"
-openssl-sys = "0.7.17"
 
 [build-dependencies]
-gcc = "0.3.0"
-make-cmd = "0.1.0"
+gcc = "0.3"
+make-cmd = "0.1"
