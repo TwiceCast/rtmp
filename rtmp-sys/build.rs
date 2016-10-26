@@ -1,16 +1,8 @@
-extern crate make_cmd;
-
-use std::env;
+extern crate cmake;
 
 fn main() {
-  let mut command = make_cmd::make();
-  command.current_dir("rtmpdump/librtmp");
-  let status = command.status().unwrap();
+    let dst = cmake::Config::new("librtmp").build();
 
-  if !status.success() {
-    panic!("Can't build librtmp!");
-  }
-
-  println!("cargo:rustc-link-search=native={}/rtmpdump/librtmp", env::var("CARGO_MANIFEST_DIR").unwrap());
-  println!("cargo:rustc-link-lib=static=rtmp");
+    println!("cargo:rustc-link-search=native={}", dst.display());
+    println!("cargo:rustc-link-lib=static=foo");
 }
