@@ -3,6 +3,11 @@ extern crate cmake;
 fn main() {
     let dst = cmake::Config::new("librtmp").build_target("rtmp").build();
 
-    println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
+    if cfg!(any(windows)) {
+        println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
+    }
+    else {
+        println!("cargo:rustc-link-search=native={}", dst.display());
+    }
     println!("cargo:rustc-link-lib=static=rtmp");
 }
