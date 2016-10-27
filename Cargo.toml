@@ -7,4 +7,3 @@ authors = ["Stargateur <antoine.plaskowski@epitech.eu>"]
 byteorder = "^0.5.3"
 time = "^0.1"
 rand = "^0.3"
-rtmp-sys = { path="rtmp-sys" }

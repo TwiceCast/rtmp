@@ -1,7 +1,6 @@
 extern crate byteorder;
 extern crate rand;
 extern crate time;
-extern crate rtmp_sys;
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -162,7 +161,6 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 }
 
 fn main() {
-  unsafe { println!("{:?}", rtmp_sys::rtmp::RTMP_LibVersion()) };
   let listener = TcpListener::bind("0.0.0.0:80").unwrap();
   let mut handle_thread = Vec::new();
 //  let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
