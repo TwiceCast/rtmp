@@ -1,3 +1,0 @@
-[submodule "rtmp-sys/librtmp"]
-	path = rtmp-sys/librtmp
-	url = https://github.com/Stargateur/librtmp.git
