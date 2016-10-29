@@ -2,8 +2,7 @@
 name = "rtmp"
 version = "0.1.0"
 authors = ["Stargateur <antoine.plaskowski@epitech.eu>"]
+build = "build.rs"
 
 [dependencies]
-byteorder = "^0.5.3"
-time = "^0.1"
-rand = "^0.3"
+rtmp-sys = { git = "https://github.com/Stargateur/rtmp-sys.git" }
