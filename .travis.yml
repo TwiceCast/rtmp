@@ -13,3 +13,9 @@ addons:
     packages:
       - cmake
       - cmake-data
+notifications:
+  email:
+    recipients:
+      - antoine.plaskowski@epitech.eu
+    on_success: [change]
+    on_failure: [always]
