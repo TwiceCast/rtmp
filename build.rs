@@ -6,4 +6,8 @@ fn main() {
         println!("cargo:rustc-link-lib=static=libeay32");
         println!("cargo:rustc-link-lib=static=zlibd")
     }
+    else {
+        println!("cargo:rustc-link-lib=ssl");
+        println!("cargo:rustc-link-lib=crypto");
+    }
 }
