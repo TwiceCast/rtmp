@@ -1,167 +1,181 @@
 extern crate byteorder;
 extern crate rand;
 extern crate time;
+extern crate amf;
 
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::net::{TcpListener, TcpStream};
 use std::str;
+use std::collections::BTreeMap;
+use std::fs::File;
+use amf::Value;
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-
-use rand::Rng;
-
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
 use std::thread;
 
-#[derive(Debug)]
-enum Error {
-  Io(::std::io::Error),
-  Other(String),
-}
+use header::Header;
+use message::{Message, ControleMessage};
+use usercontrolmessage::UserControlMessage;
+use commandemessage::{CommandeMessage, NetConnection};
+use error::{Result};
+use handshaking::{do_server_handshaking, do_client_handshaking};
 
-impl From<::std::io::Error> for Error {
-  fn from(err: ::std::io::Error) -> Error {
-    Error::Io(err)
-  }
-}
+mod header;
+mod message;
+mod usercontrolmessage;
+mod commandemessage;
+mod error;
+mod handshaking;
+mod datamessage;
+mod audiodata;
+mod videodata;
 
-impl From<String> for Error {
-  fn from(err: String) -> Error {
-    Error::Other(err)
-  }
-}
-
-impl<'a> From<&'a str> for Error {
-  fn from(err: &'a str) -> Error {
-    Error::Other(err.to_owned())
-    // Alias: Error::from(err.to_owned())
-    // Alias: err.to_owned().into()
-  }
-}
-
-type Result<T> = ::std::result::Result<T, Error>;
-
-#[derive(Debug)]
-struct F0 {
-  version: u8,
-}
-
-impl F0 {
-  pub fn read<R: Read>(reader: &mut R) -> Result<F0> {
-    let version = try!(reader.read_u8());
-
-    Ok(F0 {
-      version: version,
-    })
-  }
-
-  pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
-    try!(writer.write_u8(self.version));
-
-    Ok(())
-  }
-}
-
-struct F1 {
-  time: u32,
-  zero: u32,
-  bytes: [u8; 1528],
-}
-
-impl F1 {
-  pub fn read<R: Read>(reader: &mut R) -> Result<F1> {
-    let time = try!(reader.read_u32::<BigEndian>());
-    let zero = try!(reader.read_u32::<BigEndian>());
-    if zero != 0 {
-//      return Err("Fuck zeros".into());
+fn on_receive<W: Write>(writer: &mut W, m: & Message) -> Result<()> {
+  match *m {
+    Message::CommandeMessage(ref m) => {
+      match *m {
+        CommandeMessage::NetConnection(ref mess) => {
+          if mess.command_name == "connect" {
+            let rep = ControleMessage::WindowsAcknowledgementSize(50000000);
+            rep.send(writer).unwrap();
+            let rep = ControleMessage::SetBandwith(50000000);
+            rep.send(writer).unwrap();
+            let rep = ControleMessage::SetChunkSize(4096);
+            rep.send(writer).unwrap();
+            //let rep = UserControlMessage::StreamBegin(42);
+            //rep.send(writer).unwrap();
+            let mut map = BTreeMap::new();
+            map.insert("capabilities".to_string(), Value::Number(32.));
+            map.insert("fmsVersion".to_string(), Value::String("FMS/3,0,1,123".to_string()));
+            let connect = NetConnection{ command_name: "_result".to_string(), transaction_id: mess.transaction_id, properties: Value::Object(map), opt: None };
+            connect.send(writer).unwrap();
+            writer.flush().unwrap();            
+          }
+          else if mess.command_name == "createStream" {
+            let connect = NetConnection{ command_name: "_result".to_string(), transaction_id: mess.transaction_id, properties: Value::Null, opt: Some(Value::Number(42.)) };
+            connect.send(writer).unwrap();
+            writer.flush().unwrap();       
+          }
+          Ok(())
+        },
+        CommandeMessage::NetStreamCommand(ref mess) =>{
+          if mess.command_name == "publish" {
+            let mut map = BTreeMap::new();
+            map.insert("level".to_string(), Value::String("status".to_string()));
+            map.insert("code".to_string(), Value::String("NetStream.Publish.Start".to_string()));
+            map.insert("description".to_string(), Value::String("publish of the stream".to_string()));
+            let connect = NetConnection{ command_name: "onStatus".to_string(), transaction_id: 0., properties: Value::Null, opt: Some(Value::Object(map)) };
+            connect.send(writer).unwrap();
+            writer.flush().unwrap();   
+          }
+          else if mess.command_name == "deleteStream" {
+            let mut map = BTreeMap::new();
+            map.insert("level".to_string(), Value::String("status".to_string()));
+            map.insert("code".to_string(), Value::String("NetStream.Unpublish.Success".to_string()));
+            map.insert("description".to_string(), Value::String("Stop publishing".to_string()));
+            let connect = NetConnection{ command_name: "onStatus".to_string(), transaction_id: 0., properties: Value::Null, opt: Some(Value::Object(map)) };
+            connect.send(writer).unwrap();
+            writer.flush().unwrap();
+          }
+          Ok(())
+        }
+      }
+    },
+    Message::ControleMessage(ref m) => {
+      match *m {
+        ControleMessage::SetChunkSize(nb) => {
+          unsafe {
+            message::CHUNK_SIZE = nb;
+          }
+          Ok(())
+        },
+        _ => Ok(())
+      }
     }
-    let mut bytes: [u8; 1528] = unsafe { ::std::mem::uninitialized() };
-    try!(reader.read_exact(&mut bytes));
-
-    Ok(F1 {
-      time: time,
-      zero: zero,
-      bytes: bytes,
-    })
-  }
-
-  pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
-    try!(writer.write_u32::<BigEndian>(self.time));
-    try!(writer.write_u32::<BigEndian>(self.zero));
-    try!(writer.write(&self.bytes));
-
-    Ok(())
-  }
-}
-
-impl ::std::fmt::Debug for F1 {
-  fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-    let bytes = &self.bytes as &[u8];
-    fmt.debug_struct("F1")
-       .field("time", &self.time)
-       .field("zero", &self.zero)
-       .field("bytes", &bytes)
-       .finish()
+    _ => Ok(())
   }
 }
 
 fn handle_client(stream: TcpStream) -> Result<()> {
 //  let start = time::SteadyTime::now();
-
+  let mut file = File::create("log.txt").unwrap();
+  let mut last_header = None;
   println!("{:?}, {:?}", stream.peer_addr(), stream.local_addr());
   let mut reader = BufReader::new(&stream);
   let mut writer = BufWriter::new(&stream);
-
-  // read c0 packet
-  let c0 = F0::read(&mut reader).unwrap();
-  println!("{:?}", c0);
-
-  // read c1 packet
-  let c1 = F1::read(&mut reader).unwrap();
-  println!("{:?}", c1);
-
-  let s0 = F0 {
-    version: 3,
-  };
-  try!(s0.write(&mut writer));
-
-  let mut rng = rand::thread_rng();
-  let mut bytes: [u8; 1528] = unsafe { ::std::mem::uninitialized() };
-  rng.fill_bytes(&mut bytes);
-  let s1 = F1 {
-    time: 0,
-    zero: 0,
-    bytes: bytes,
-  };
-  try!(s1.write(&mut writer));
-
-  let s2 = F1 {
-    time: c1.time,
-    zero: c1.time + 2000,
-    bytes: c1.bytes,
-  };
-  try!(s2.write(&mut writer));
-  try!(writer.flush());
+  do_server_handshaking(&mut reader, &mut writer).unwrap();
+  println!("Handshaking Okay");
   loop {
-    match reader.read(&mut bytes) {
-      Ok(size) => {
-        if size == 0 {
-          break;
-        }
-        println!("loop = {:?}", &bytes[0..size]);
-      }
-      Err(e) => {
-        println!("{:?}", e);
-        break;
+    let mut h = Header::read(&mut reader, last_header).unwrap();
+    let m = Message::read(&mut h, &mut reader).unwrap();
+    match m {
+      Message::AudioData(_) => println!("{:?}", h),
+      Message::VideoData(_) => println!("{:?}", h),
+      _ => {
+        println!("{:?}", h);
+        println!("{}", m);
+        println!(""); 
       }
     }
+    on_receive(&mut writer, &m).unwrap();
+    match m {
+      Message::Unknown(_) => (),
+      _ => last_header = Some(h),
+    }
+    {
+      h.write(&mut file).unwrap();
+      m.write(&mut file);
+    }
+    writer.flush().unwrap();
   }
-  Ok(())
 }
 
-fn main() {
-  let listener = TcpListener::bind("0.0.0.0:80").unwrap();
+fn handle_server(stream: TcpStream) {
+  let mut last_header = None;
+  println!("{:?}, {:?}", stream.peer_addr(), stream.local_addr());
+  let mut reader = BufReader::new(&stream);
+  let mut writer = BufWriter::new(&stream);
+  do_client_handshaking(&mut reader, &mut writer).unwrap();
+  let m = ControleMessage::SetChunkSize(4096);
+  m.send(&mut writer).unwrap();
+  let mut map = BTreeMap::new();
+  map.insert("app".to_string(), Value::String("live".to_string()));
+  map.insert("flashVer".to_string(), Value::String("FMLE/3.0 (compatible; FMSc/1.0)".to_string()));
+  map.insert("swfUrl".to_string(), Value::String("rtmp://37.187.99.70:1935/live".to_string()));
+  map.insert("tcUrl".to_string(), Value::String("rtmp://37.187.99.70:1935/live".to_string()));
+  map.insert("type".to_string(), Value::String("nonprivate".to_string()));
+  let m2 = NetConnection{ command_name: "connect".to_string(), transaction_id: 1., properties: Value::Object(map), opt: None };
+  m2.send(&mut writer).unwrap();
+  writer.flush().unwrap();
+  loop {
+    let mut h = Header::read(&mut reader, last_header).unwrap();
+    println!("{:?}", h);
+    let m = Message::read(&mut h, &mut reader).unwrap();
+    println!("{}", m);
+    match m {
+      Message::UserControlMessage(m) => {
+        match m {
+          UserControlMessage::PingRequest(t) => {
+            let rep = UserControlMessage::PingResponse(t);
+            rep.send(&mut writer).unwrap();
+            writer.flush().unwrap();
+          },
+          _ => (),          
+        }
+      }
+      _ => (),
+    };
+    last_header = Some(h);
+  }
+}
+
+fn main_client() {
+  let stream = TcpStream::connect("37.187.99.70:1935").unwrap();
+  handle_server(stream)
+}
+
+fn main_server() {
+//  println!("server");
+  let listener = TcpListener::bind("0.0.0.0:42").unwrap();
   let mut handle_thread = Vec::new();
 //  let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
 
@@ -198,4 +212,9 @@ fn main() {
       }
     }
   }
+}
+
+fn main() {
+  main_server();
+  main_client()
 }
