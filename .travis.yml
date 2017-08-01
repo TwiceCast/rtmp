@@ -1,0 +1,24 @@
+language: rust
+rust:
+- stable
+- beta
+- nightly
+cache: cargo
+matrix:
+  allow_failures:
+  - rust: nightly
+addons:
+  apt:
+    sources:
+    - george-edison55-precise-backports
+    packages:
+    - cmake
+    - cmake-data
+notifications:
+  email:
+    recipients:
+    - antoine.plaskowski@epitech.eu
+    on_success: change
+    on_failure: always
+  slack:
+    secure: kus9gTlBYhSbK5ei9yBSCm/XUzqqLXdHUpOnCD5g29ZZjyPPg7fPJxhu8pvv9sIDMIsF9Tiyr0GZvGWPMbKjo1CaG4MhIbwpFAphT9GGqIRjz2I+r92efFXaWAZa2ra+fZo4Y9AAvMLmQ0ov6VuK6mPSjEF/1EthpMFbH99TSELMy4sd87elc4sJlNwy1I2kCP7TbtBPeD3y2EtsAMR7vpxaZummNC9Ro4iqnd9Ut2LtdXfX+riB3SHKD7wrvLi1bxkGOojIOv1JYl2xHf2y6YbI+YkDGEtqgScEVJVguKx5GLnz22RtfvIHxbibuKoXvgZTSc29PAPcuH2LgJqXzP8w8OvF2qpTULAn/+Pid4MJ/NkXXGgiGF7yqbR8mX/mnZodqjfsY3NM5D8NGgCXsYKs/b0pHM3wsI1xFDgqHm5BWvVIzVS8ZaNlVHwx75JOKOCFqO/4pWg8Ca9kdk0PhV2sG5SNES+yB64kqc3OXxzTawzXMhUytfnh/7selJdM7lJdIt2g6FLwJmgtOm5cRGM60PDhu8/UxLIPU2xdx3BE+Ad0o9Vpe67on4sNoBZ6AZouY5VofQvM6VDyOTnZ54KNeBOY9hsnYG4YxXuttXY4q5jT7f965hQ4ChSKCb34QA3Q4GwdpZ4mXkYOEz2zZqVgoqrBBWCDrZsrdHURvgE=
