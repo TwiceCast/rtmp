@@ -2,22 +2,25 @@ extern crate byteorder;
 extern crate rand;
 extern crate time;
 extern crate amf;
+#[macro_use]
+extern crate log;
+extern crate simple_logger;
 
 use std::io::{BufReader, BufWriter, Write};
 use std::net::{TcpListener, TcpStream};
 use std::str;
 use std::collections::BTreeMap;
-use std::fs::File;
 use amf::Value;
 
 use std::thread;
 
-use header::Header;
-use message::{Message, ControleMessage};
+use message::{Message, ControleMessage, SetChunkSize, WindowsAcknowledgementSize, SetBandwith};
 use usercontrolmessage::UserControlMessage;
 use commandemessage::{CommandeMessage, NetConnection};
 use error::{Result};
 use handshaking::{do_server_handshaking, do_client_handshaking};
+use messageinterface::MessageInterface;
+use header::Header;
 
 mod header;
 mod message;
@@ -28,30 +31,39 @@ mod handshaking;
 mod datamessage;
 mod audiodata;
 mod videodata;
+mod slicereader;
+mod messageinterface;
 
 fn on_receive<W: Write>(writer: &mut W, m: & Message) -> Result<()> {
   match *m {
-    Message::CommandeMessage(ref m) => {
+    Message::CommandeMessage(ref _h, ref m) => {
       match *m {
         CommandeMessage::NetConnection(ref mess) => {
           if mess.command_name == "connect" {
-            let rep = ControleMessage::WindowsAcknowledgementSize(50000000);
+            let header = Header::new(0, 0, 0, 0, 0);
+            let mut rep = Message::ControleMessage(header, ControleMessage::WindowsAcknowledgementSize(WindowsAcknowledgementSize{size: 50000000}));
             rep.send(writer).unwrap();
-            let rep = ControleMessage::SetBandwith(50000000);
-            rep.send(writer).unwrap();
-            let rep = ControleMessage::SetChunkSize(4096);
+/*            let mut rep = Message::ControleMessage(header, ControleMessage::SetBandwith(SetBandwith{bandwith: 50000000, limit_type: 1}));
+            rep.send(writer).unwrap();*/
+            let mut rep = Message::ControleMessage(header, ControleMessage::SetChunkSize(SetChunkSize{size: 4096}));
             rep.send(writer).unwrap();
             //let rep = UserControlMessage::StreamBegin(42);
             //rep.send(writer).unwrap();
             let mut map = BTreeMap::new();
-            map.insert("capabilities".to_string(), Value::Number(32.));
+            map.insert("capabilities".to_string(), Value::Number(31.));
             map.insert("fmsVersion".to_string(), Value::String("FMS/3,0,1,123".to_string()));
-            let connect = NetConnection{ command_name: "_result".to_string(), transaction_id: mess.transaction_id, properties: Value::Object(map), opt: None };
+            let mut opt = BTreeMap::new();
+            opt.insert("level".to_string(), Value::String("status".to_string()));
+            opt.insert("code".to_string(), Value::String("NetConnection.Connection.Success".to_string()));
+            opt.insert("description".to_string(), Value::String("connection succeeded".to_string()));
+            opt.insert("objectEncoding".to_string(), Value::Number(0.));
+            let mut connect = Message::CommandeMessage(header, CommandeMessage::NetConnection(NetConnection::new("_result".to_string(), mess.transaction_id, Value::Object(map), Some(Value::Object(opt)))));
             connect.send(writer).unwrap();
             writer.flush().unwrap();            
           }
           else if mess.command_name == "createStream" {
-            let connect = NetConnection{ command_name: "_result".to_string(), transaction_id: mess.transaction_id, properties: Value::Null, opt: Some(Value::Number(42.)) };
+            let header = Header::new(0, 0, 0, 0, 0);
+            let mut connect = Message::CommandeMessage(header, CommandeMessage::NetConnection(NetConnection::new("_result".to_string(), mess.transaction_id, Value::Null, Some(Value::Number(42.)))));
             connect.send(writer).unwrap();
             writer.flush().unwrap();       
           }
@@ -63,16 +75,18 @@ fn on_receive<W: Write>(writer: &mut W, m: & Message) -> Result<()> {
             map.insert("level".to_string(), Value::String("status".to_string()));
             map.insert("code".to_string(), Value::String("NetStream.Publish.Start".to_string()));
             map.insert("description".to_string(), Value::String("publish of the stream".to_string()));
-            let connect = NetConnection{ command_name: "onStatus".to_string(), transaction_id: 0., properties: Value::Null, opt: Some(Value::Object(map)) };
+            let header = Header::new(0, 0, 0, 0, 0);
+            let mut connect = Message::CommandeMessage(header, CommandeMessage::NetConnection(NetConnection::new( "onStatus".to_string(), 0., Value::Null, Some(Value::Object(map)))));
             connect.send(writer).unwrap();
             writer.flush().unwrap();   
           }
           else if mess.command_name == "deleteStream" {
+            let header = Header::new(0, 0, 0, 0, 0);
             let mut map = BTreeMap::new();
             map.insert("level".to_string(), Value::String("status".to_string()));
             map.insert("code".to_string(), Value::String("NetStream.Unpublish.Success".to_string()));
             map.insert("description".to_string(), Value::String("Stop publishing".to_string()));
-            let connect = NetConnection{ command_name: "onStatus".to_string(), transaction_id: 0., properties: Value::Null, opt: Some(Value::Object(map)) };
+            let mut connect = Message::CommandeMessage(header, CommandeMessage::NetConnection(NetConnection::new("onStatus".to_string(), 0., Value::Null, Some(Value::Object(map)))));
             connect.send(writer).unwrap();
             writer.flush().unwrap();
           }
@@ -80,11 +94,12 @@ fn on_receive<W: Write>(writer: &mut W, m: & Message) -> Result<()> {
         }
       }
     },
-    Message::ControleMessage(ref m) => {
+    Message::ControleMessage(ref _h, ref m) => {
       match *m {
-        ControleMessage::SetChunkSize(nb) => {
+        ControleMessage::SetChunkSize(ref s) => {
           unsafe {
-            message::CHUNK_SIZE = nb;
+            info!("changement of the chunk size to {}", s.size);
+            message::CHUNK_SIZE = s.size;
           }
           Ok(())
         },
@@ -97,45 +112,24 @@ fn on_receive<W: Write>(writer: &mut W, m: & Message) -> Result<()> {
 
 fn handle_client(stream: TcpStream) -> Result<()> {
 //  let start = time::SteadyTime::now();
-  let mut file = File::create("log.txt").unwrap();
-  let mut last_header = None;
-  println!("{:?}, {:?}", stream.peer_addr(), stream.local_addr());
   let mut reader = BufReader::new(&stream);
   let mut writer = BufWriter::new(&stream);
   do_server_handshaking(&mut reader, &mut writer).unwrap();
-  println!("Handshaking Okay");
+  debug!("Handshaking done");
   loop {
-    let mut h = Header::read(&mut reader, last_header).unwrap();
-    let m = Message::read(&mut h, &mut reader).unwrap();
-    match m {
-      Message::AudioData(_) => println!("{:?}", h),
-      Message::VideoData(_) => println!("{:?}", h),
-      _ => {
-        println!("{:?}", h);
-        println!("{}", m);
-        println!(""); 
-      }
-    }
+    let m = Message::read(&mut reader).unwrap();
+    println!("{}", m);
     on_receive(&mut writer, &m).unwrap();
-    match m {
-      Message::Unknown(_) => (),
-      _ => last_header = Some(h),
-    }
-    {
-      h.write(&mut file).unwrap();
-      m.write(&mut file);
-    }
     writer.flush().unwrap();
   }
 }
 
 fn handle_server(stream: TcpStream) {
-  let mut last_header = None;
-  println!("{:?}, {:?}", stream.peer_addr(), stream.local_addr());
   let mut reader = BufReader::new(&stream);
   let mut writer = BufWriter::new(&stream);
   do_client_handshaking(&mut reader, &mut writer).unwrap();
-  let m = ControleMessage::SetChunkSize(4096);
+  debug!("Handshaking done");
+  let m = ControleMessage::SetChunkSize(SetChunkSize{size: 4096});
   m.send(&mut writer).unwrap();
   let mut map = BTreeMap::new();
   map.insert("app".to_string(), Value::String("live".to_string()));
@@ -143,16 +137,14 @@ fn handle_server(stream: TcpStream) {
   map.insert("swfUrl".to_string(), Value::String("rtmp://37.187.99.70:1935/live".to_string()));
   map.insert("tcUrl".to_string(), Value::String("rtmp://37.187.99.70:1935/live".to_string()));
   map.insert("type".to_string(), Value::String("nonprivate".to_string()));
-  let m2 = NetConnection{ command_name: "connect".to_string(), transaction_id: 1., properties: Value::Object(map), opt: None };
+  let m2 = NetConnection::new("connect".to_string(), 1., Value::Object(map), None);
   m2.send(&mut writer).unwrap();
   writer.flush().unwrap();
   loop {
-    let mut h = Header::read(&mut reader, last_header).unwrap();
-    println!("{:?}", h);
-    let m = Message::read(&mut h, &mut reader).unwrap();
+    let m = Message::read(&mut reader).unwrap();
     println!("{}", m);
     match m {
-      Message::UserControlMessage(m) => {
+      Message::UserControlMessage(_h, m) => {
         match m {
           UserControlMessage::PingRequest(t) => {
             let rep = UserControlMessage::PingResponse(t);
@@ -164,7 +156,6 @@ fn handle_server(stream: TcpStream) {
       }
       _ => (),
     };
-    last_header = Some(h);
   }
 }
 
@@ -174,7 +165,7 @@ fn main_client() {
 }
 
 fn main_server() {
-//  println!("server");
+  info!("server start");
   let listener = TcpListener::bind("0.0.0.0:42").unwrap();
   let mut handle_thread = Vec::new();
 //  let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
@@ -182,6 +173,7 @@ fn main_server() {
   for stream in listener.incoming() {
     match stream {
       Ok(stream) => {
+        info!("New client connected");
         let builder = thread::Builder::new().name("handle_client".into());
 //        let thread_tx = tx.clone();
 
@@ -215,6 +207,7 @@ fn main_server() {
 }
 
 fn main() {
+  simple_logger::init_with_level(log::LogLevel::Trace).unwrap();
   main_server();
   main_client()
 }

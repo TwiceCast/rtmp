@@ -1,28 +1,29 @@
 use header::Header;
 use std::io::{Read, Write};
-use message;
+
+use messageinterface::MessageInterface;
 
 pub struct VideoData {
   pub data: Vec<u8>,
 }
 
-impl VideoData {
-	pub fn read<R: Read>(header: &mut Header, reader: &mut R) -> Result<VideoData, ()> {
+impl MessageInterface for VideoData {
+  type Message = VideoData;
+
+	fn read<R: Read>(header: Header, reader: &mut R) -> Result<Self::Message, ()> {
 		let mut slice = vec![];
-    let mut size = header.message_length;
-    unsafe {
-      if message::CHUNK_SIZE < size {
-        header.message_length -= message::CHUNK_SIZE;
-        size = message::CHUNK_SIZE
-      }      
-    }
+    let size = header.message_length;
 		slice.resize(size as usize, 0);
     reader.read(&mut slice).unwrap();
     Ok(VideoData{data: slice})
 	}
 
-  pub fn write<W: Write>(&self, writer: &mut W) {
-    writer.write(&self.data).unwrap();
+  fn send<W: Write>(&self, writer: &mut W) -> Result<usize, ()> {
+    let result = writer.write(&self.data).unwrap();
+    Ok(result)
+  }
+
+  fn fill_header(&self, _header: &mut Header) {
   }
 }
 

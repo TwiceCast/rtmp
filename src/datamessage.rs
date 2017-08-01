@@ -1,13 +1,25 @@
-use header::Header;
 use std::io::{Read, Write};
 use amf::{Value, self, Serialize};
+
+use header::Header;
+use messageinterface::MessageInterface;
 
 pub struct DataMessage {
   pub data: Vec<Value>,
 }
 
 impl DataMessage {
-	pub fn read<R: Read>(header: & Header, reader: &mut R) -> Result<Self, ()> {
+  fn serialize<W: Write>(writer: &mut W, v: & Value)
+  {
+    let ser = amf::Serializer::new(writer);
+    v.serialize(ser).unwrap();
+  }
+}
+
+impl MessageInterface for DataMessage {
+  type Message = DataMessage;
+
+	fn read<R: Read>(header: Header, reader: &mut R) -> Result<Self::Message, ()> {
 		let mut slice = vec![];
 		slice.resize(header.message_length as usize, 0);
     reader.read(&mut slice).unwrap();
@@ -22,18 +34,16 @@ impl DataMessage {
     }
   }
 
-  fn serialize<W: Write>(writer: &mut W, v: & Value)
-  {
-    let ser = amf::Serializer::new(writer);
-    v.serialize(ser).unwrap();
-  }
-
-  pub fn write<W: Write>(&self, writer: &mut W) {
+  fn send<W: Write>(&self, writer: &mut W) -> Result<usize, ()> {
     let mut vec = Vec::new();
     for ref obj in &self.data {
       Self::serialize(&mut vec, &obj);   
     }
-    writer.write(&vec).unwrap();   
+    let result = writer.write(&vec).unwrap();
+    Ok(result)
+  }
+
+  fn fill_header(&self, _header: &mut Header) {
   }
 }
 

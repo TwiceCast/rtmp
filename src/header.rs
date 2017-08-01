@@ -30,14 +30,25 @@ impl Header {
 		}
 	}
 
+	pub fn copy(&mut self, header: Header) {
+		self.chunk_stream_id = header.chunk_stream_id;
+		self.timestamp = header.timestamp;
+		self.delta_timestamp = header.delta_timestamp;
+		self.message_length = header.message_length;
+		self.message_type_id = header.message_type_id;
+		self.message_stream_id = header.message_stream_id;
+		self.extend_timestamp = header.extend_timestamp;
+		self.htype = header.htype;
+	}
+
 	fn read_header0<R: Read>(reader: &mut R, chunk_stream_id: u32, _last_header: Option<Header>) -> Result<Header, ()> {
 		let mut timestamp = reader.read_int::<BigEndian>(3).unwrap() as u32;
 		let message_length = reader.read_int::<BigEndian>(3).unwrap() as i64;
 		let message_type_id = reader.read_u8().unwrap();
 		let message_stream_id = reader.read_u32::<LittleEndian>().unwrap();
 		let extend_timestamp;
-		if timestamp > 0xFFFFFF {
-			println!("extend timestamp {}",chunk_stream_id);
+		if timestamp >= 0xFFFFFF {
+			//println!("extend timestamp {}",chunk_stream_id);
 			extend_timestamp = true;
 			timestamp = reader.read_u32::<BigEndian>().unwrap();
 		} else {
@@ -59,10 +70,18 @@ impl Header {
 		match last_header {
 			None => Err(()),
 			Some(h) => {
-				let timestamp = reader.read_int::<BigEndian>(3).unwrap() as u32;
+				let mut timestamp = reader.read_int::<BigEndian>(3).unwrap() as u32;
 				let message_length = reader.read_int::<BigEndian>(3).unwrap() as i64;
 				let message_type_id = reader.read_u8().unwrap();
-				let extend_timestamp = false;
+				let extend_timestamp;
+				//println!("{:?}, {:?}", h.timestamp, timestamp);
+				if timestamp >= 0xFFFFFF {
+					//println!("extend timestamp {}",chunk_stream_id);
+					extend_timestamp = true;
+					timestamp = reader.read_u32::<BigEndian>().unwrap();
+				} else {
+					extend_timestamp = false;
+				}
 				Ok(Header{
 					chunk_stream_id: chunk_stream_id,
 					timestamp: h.timestamp + timestamp,
@@ -145,13 +164,20 @@ impl Header {
 		}
 	}
 
-	pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), ()> {
+	pub fn write<W: Write>(&self, writer: &mut W) -> Result<usize, ()> {
+		let mut result = 0;
 		writer.write_u8(self.chunk_stream_id as u8).unwrap();
+		result += 1;
 		writer.write_int::<BigEndian>(self.timestamp as i64, 3).unwrap();
+		result += 3;
 		writer.write_int::<BigEndian>(self.message_length as i64, 3).unwrap();
+		result += 3;
 		writer.write_u8(self.message_type_id).unwrap();
+		result += 1;
 		writer.write_u32::<BigEndian>(self.message_stream_id & 0x7fff).unwrap();
-		Ok(())
+		result += 4;
+		//trace!("Send of a header: {:?}", self);
+		Ok(result)
 	}
 }
 

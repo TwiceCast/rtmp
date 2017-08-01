@@ -70,12 +70,10 @@ impl ::std::fmt::Debug for F1 {
 pub fn do_server_handshaking<R: Read, W: Write>(mut reader: R, mut writer: W) -> Result<()>
 {
   // read c0 packet
-  let c0 = F0::read(&mut reader).unwrap();
-  println!("{:?}", c0);
+  let _c0 = F0::read(&mut reader).unwrap();
 
   // read c1 packet
   let c1 = F1::read(&mut reader).unwrap();
-  //println!("{:?}", c1);
 
   let s0 = F0 {
     version: 3,
